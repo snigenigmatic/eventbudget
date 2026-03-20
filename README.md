@@ -1,6 +1,6 @@
 # Event Budget Planning and Expense Approval System
 
-A Spring Boot REST API for managing college event budgets, expense claims, and multi-level approval workflows.
+A Spring Boot REST API for managing college event budgets, expense claims, and multi-level approval workflows. Developing for the course "Object Oriented Analysis and Design - UE23CS351A" at PES University. 
 
 **Team C13 — Section C, PES University**
 - C Kaustubh (PES1UG23CS154)
