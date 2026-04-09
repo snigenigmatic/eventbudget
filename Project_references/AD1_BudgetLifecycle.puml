@@ -1,0 +1,148 @@
+@startuml AD1_BudgetLifecycle
+
+skinparam activityFontSize 12
+skinparam activityFontName Arial
+skinparam activityArrowFontSize 11
+skinparam activityArrowFontName Arial
+skinparam activityArrowColor #444444
+skinparam activityBorderColor #555555
+skinparam activityBackgroundColor #FAFAFA
+skinparam activityStartColor #37474F
+skinparam activityEndColor #37474F
+skinparam activityDiamondBackgroundColor #FFF9C4
+skinparam activityDiamondBorderColor #F9A825
+skinparam noteFontSize 11
+skinparam noteFontName Arial
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+skinparam shadowing false
+skinparam dpi 150
+
+title Activity Diagram 1 — Budget Lifecycle
+
+|Event Organizer|
+start
+
+:Access budget creation form;
+:Enter event details\n(name, date, venue, description);
+:Define budget categories\nand allocate amounts;
+
+if (Save as draft?) then (yes)
+  :Save Budget\n[status = DRAFT];
+  note right
+    No notification sent.
+    Organizer can edit freely.
+  end note
+  :Edit / update draft;
+  :Submit draft for approval;
+else (no — submit directly)
+endif
+
+:Validate category allocations\nsum == total budget;
+
+if (Allocation valid?) then (no)
+  :Display mismatch error\nwith difference amount;
+  :Correct allocations;
+  :Re-submit;
+else (yes)
+endif
+
+:Set Budget status = PENDING_APPROVAL;
+:Assign unique Budget ID;
+:Notify Approving Authority;
+
+|Approving Authority|
+
+:Receive notification;
+:Review budget details\n(categories, amounts, event context);
+
+if (Budget exceeds\ndepartment limit?) then (yes)
+  :Flag for higher-level approval;
+  :Request additional justification;
+  :Organizer provides justification;
+endif
+
+if (Decision?) then (approve)
+  :Set Budget status = APPROVED;
+  :Notify Event Organizer;
+
+  |Event Organizer|
+
+  :Submit expense claims\nagainst approved budget;
+
+  |Finance Admin|
+
+  :Monitor budget utilization;
+
+  fork
+    :Budget Variance Alert\n(category >= 80% utilized);
+    :Notify organizer + Finance Admin;
+  fork again
+    :Normal expense processing;
+  end fork
+
+  :Event concludes;
+  :Verify all claims\nare in final status;
+
+  if (Pending claims exist?) then (yes)
+    if (Force close?) then (yes)
+      :Auto-reject all pending claims;
+      :Release committed amounts;
+      :Notify affected organizers;
+    else (wait)
+      :Wait for approvers\nto process pending claims;
+    endif
+  else (no)
+  endif
+
+  if (High variance detected\n(> ±20% per category)?) then (yes)
+    :Require mandatory\nvariance explanation;
+    :Finance Admin provides justification;
+  else (no)
+  endif
+
+  if (High unspent amount\n(> 30% of total)?) then (yes)
+    :Alert: verify before\nmarking for reallocation;
+    :Finance Admin confirms;
+  else (no)
+  endif
+
+  :Generate final budget summary\n(allocation vs actual, variance analysis);
+  :Set Budget status = CLOSED;
+  note right
+    Budget is now read-only.
+    No further modifications
+    or submissions allowed.
+  end note
+  :Mark unspent amounts\nfor reallocation;
+  :Send closure notifications\nwith final report;
+
+  |Event Organizer|
+  :Receive final budget report;
+
+else (reject)
+
+  |Approving Authority|
+  :Set Budget status = REJECTED;
+  :Provide rejection reason;
+  :Notify Event Organizer;
+
+  |Event Organizer|
+  :Receive rejection notification;
+
+  if (Revise and resubmit?) then (yes)
+    :Update budget allocations;
+    :Re-submit for approval;
+    note right
+      Returns to PENDING_APPROVAL
+      flow above.
+    end note
+  else (abandon)
+    :Budget remains REJECTED;
+  endif
+
+endif
+
+stop
+
+@enduml

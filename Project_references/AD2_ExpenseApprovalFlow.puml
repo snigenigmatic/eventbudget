@@ -1,0 +1,189 @@
+@startuml AD2_ExpenseApprovalFlow
+
+skinparam activityFontSize 12
+skinparam activityFontName Arial
+skinparam activityArrowFontSize 11
+skinparam activityArrowFontName Arial
+skinparam activityArrowColor #444444
+skinparam activityBorderColor #555555
+skinparam activityBackgroundColor #FAFAFA
+skinparam activityStartColor #37474F
+skinparam activityEndColor #37474F
+skinparam activityDiamondBackgroundColor #FFF9C4
+skinparam activityDiamondBorderColor #F9A825
+skinparam noteFontSize 11
+skinparam noteFontName Arial
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+skinparam shadowing false
+skinparam dpi 150
+
+title Activity Diagram 2 — Expense Claim Approval Flow
+
+|Event Organizer|
+start
+
+:Select approved budget\nand expense category;
+:Enter expense details\n(vendor, amount, date, description);
+:Upload supporting documents\n(invoice / receipt);
+
+if (Save as draft?) then (yes)
+  :Save ExpenseClaim\n[status = DRAFT];
+  note right
+    No budget committed.
+    No workflow triggered.
+  end note
+  :Edit and complete draft;
+  :Submit draft;
+else (no)
+endif
+
+|System|
+
+:Validate budget is APPROVED\nand not CLOSED;
+
+if (Budget open?) then (no)
+  :Return error: budget closed;
+  |Event Organizer|
+  :Receive error notification;
+  stop
+else (yes)
+endif
+
+:Check available balance\nin selected category;
+
+if (Sufficient balance?) then (no)
+  :Return error: insufficient balance;
+  |Event Organizer|
+  :Reduce amount or\nrequest reallocation;
+  stop
+else (yes)
+endif
+
+:Validate against CategoryRules\n(max amount, mandatory docs,\nrestricted category);
+
+if (Rules pass?) then (no)
+  :Return violation message;
+  |Event Organizer|
+  :Correct expense and resubmit;
+  stop
+else (yes)
+endif
+
+:Commit amount in BudgetCategory\n(committedAmount += claim.amount);
+
+:Check category utilization;
+
+if (Utilization >= 80%?) then (yes)
+  :Send Budget Variance Alert\nto Organizer + Finance Admin;
+else (no)
+endif
+
+:Resolve ApprovalStrategy\nvia ApprovalStrategyResolver;
+
+note right
+  amount <= autoApproveLimit    → AutoApprovalStrategy
+  amount <= singleLevelLimit    → SingleLevelApprovalStrategy
+  amount >  multiLevelThreshold → MultiLevelApprovalStrategy
+end note
+
+if (Strategy?) then (AutoApproval)
+  :Set ExpenseClaim\n[status = APPROVED];
+  :Convert committed\nto approvedExpenditure;
+  |Event Organizer|
+  :Receive auto-approval notification;
+  stop
+else (Single or Multi-level)
+endif
+
+:Build ApprovalWorkflow\nwith ordered ApprovalSteps;
+:Set ExpenseClaim\n[status = PENDING_APPROVAL];
+:Notify first Approving Authority;
+
+|Approving Authority|
+
+:Receive notification;
+:Review expense details,\ndocuments, budget balances;
+
+if (Action?) then (approve)
+
+  :Record decision on ApprovalStep\n(APPROVED + comment);
+  :Advance workflow;
+
+  |System|
+
+  if (More approval steps?) then (yes)
+    :Notify next Approving Authority;
+    |Approving Authority|
+    note right
+      Multi-level flow:
+      returns to review step above
+      for next approver in chain.
+    end note
+  else (no — final approval)
+    :Convert committedAmount\nto approvedExpenditure;
+    :Set ExpenseClaim\n[status = APPROVED];
+    :Notify Event Organizer;
+    |Event Organizer|
+    :Receive approval notification;
+    stop
+  endif
+
+else if (Action?) then (reject)
+
+  :Record decision on ApprovalStep\n(REJECTED + reason);
+  :Release committed amount\nback to available balance;
+  :Set ExpenseClaim\n[status = REJECTED];
+  :Notify Event Organizer with reason;
+
+  |Event Organizer|
+  :Receive rejection notification;
+
+  if (Revise and resubmit?) then (yes)
+    :Correct and resubmit claim;
+    note right
+      Returns to start of
+      submission flow above.
+    end note
+  else (no)
+    :Claim remains REJECTED;
+    stop
+  endif
+
+else if (Action?) then (request info)
+
+  :Record INFO_REQUESTED\non ApprovalStep;
+  :Set ExpenseClaim\n[status = INFO_REQUESTED];
+  :Remove from approver queue;
+  :Notify Organizer with query;
+
+  |Event Organizer|
+  :Provide requested information;
+  :Resubmit claim;
+
+  |System|
+  :Set ExpenseClaim\n[status = PENDING_APPROVAL];
+  :Return claim to\napprover queue;
+
+  |Approving Authority|
+  note right
+    Returns to review step above.
+  end note
+
+else (delegate)
+
+  :Reassign ApprovalStep\nto selected delegate;
+  :Log delegation with reason;
+  :Notify delegate approver;
+
+  |Approving Authority|
+  note right
+    Delegate receives notification
+    and follows approval flow above.
+  end note
+
+endif
+
+stop
+
+@enduml

@@ -1,0 +1,447 @@
+@startuml C13_EventBudgetSystem_ClassDiagram
+
+skinparam classAttributeIconSize 0
+skinparam classFontSize 13
+skinparam classFontName Arial
+skinparam classAttributeFontSize 12
+skinparam classOperationFontSize 12
+skinparam ArrowFontSize 11
+skinparam ArrowColor #444444
+skinparam ClassBorderColor #555555
+skinparam ClassBackgroundColor #FAFAFA
+skinparam ClassHeaderBackgroundColor #E8EAF6
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+skinparam packageStyle rectangle
+skinparam linetype ortho
+skinparam shadowing false
+
+' ─────────────────────────────────────────
+'  ENUMERATIONS
+' ─────────────────────────────────────────
+package "enums" #EDE7F6 {
+
+  enum UserRole {
+    ORGANIZER
+    APPROVER
+    ADMIN
+  }
+
+  enum BudgetStatus {
+    DRAFT
+    PENDING_APPROVAL
+    APPROVED
+    CLOSED
+    REJECTED
+  }
+
+  enum ClaimStatus {
+    DRAFT
+    PENDING_APPROVAL
+    INFO_REQUESTED
+    APPROVED
+    REJECTED
+  }
+
+  enum ApprovalLevel {
+    SINGLE_LEVEL
+    MULTI_LEVEL
+    AUTO_APPROVED
+  }
+
+  enum ExportFormat {
+    PDF
+    CSV
+  }
+}
+
+' ─────────────────────────────────────────
+'  USER HIERARCHY
+' ─────────────────────────────────────────
+package "model.user" #E3F2FD {
+
+  abstract class User {
+    - userId : Long
+    - name : String
+    - email : String
+    - passwordHash : String
+    - role : UserRole
+    - createdAt : LocalDateTime
+    + authenticate(password : String) : boolean
+    + getRole() : UserRole
+  }
+
+  class EventOrganizer {
+    - department : String
+    + createBudget(event : Event, categories : List<BudgetCategory>) : Budget
+    + submitExpenseClaim(budget : Budget, details : ClaimDetails) : ExpenseClaim
+    + trackApprovalStatus(claimId : Long) : ClaimStatus
+  }
+
+  class ApprovingAuthority {
+    - authorizationLimit : BigDecimal
+    - designation : String
+    + approveExpense(claim : ExpenseClaim, comment : String) : void
+    + rejectExpense(claim : ExpenseClaim, reason : String) : void
+    + requestMoreInfo(claim : ExpenseClaim, query : String) : void
+    + delegateApproval(claim : ExpenseClaim, to : ApprovingAuthority) : void
+  }
+
+  class FinanceAdmin {
+    + closeEventBudget(budget : Budget) : BudgetSummary
+    + configureApprovalWorkflow(config : WorkflowConfig) : void
+    + defineExpenseCategory(category : ExpenseCategory) : void
+    + defineCategoryRule(rule : CategoryRule) : void
+    + exportFinancialReport(budget : Budget, format : ExportFormat) : byte[]
+  }
+
+  User <|-- EventOrganizer
+  User <|-- ApprovingAuthority
+  User <|-- FinanceAdmin
+}
+
+' ─────────────────────────────────────────
+'  CORE DOMAIN
+' ─────────────────────────────────────────
+package "model.domain" #E8F5E9 {
+
+  class Event {
+    - eventId : Long
+    - name : String
+    - description : String
+    - eventDate : LocalDate
+    - venue : String
+    - organizer : EventOrganizer
+    - budget : Budget
+    - createdAt : LocalDateTime
+    + isEligibleForClosure() : boolean
+  }
+
+  class Budget {
+    - budgetId : Long
+    - event : Event
+    - totalAmount : BigDecimal
+    - status : BudgetStatus
+    - categories : List<BudgetCategory>
+    - approvedBy : ApprovingAuthority
+    - createdAt : LocalDateTime
+    - closedAt : LocalDateTime
+    + getTotalAllocated() : BigDecimal
+    + isAllocationValid() : boolean
+    + isClosed() : boolean
+    + hasNoPendingClaims() : boolean
+  }
+
+  class BudgetCategory {
+    - categoryId : Long
+    - budget : Budget
+    - expenseCategory : ExpenseCategory
+    - allocatedAmount : BigDecimal
+    - committedAmount : BigDecimal
+    - approvedExpenditure : BigDecimal
+    + getAvailableBalance() : BigDecimal
+    + getUtilizationPercent() : double
+    + commitAmount(amount : BigDecimal) : void
+    + releaseCommitted(amount : BigDecimal) : void
+    + approveCommitted(amount : BigDecimal) : void
+    + isNearLimit() : boolean
+  }
+
+  class ExpenseClaim {
+    - claimId : Long
+    - budget : Budget
+    - category : BudgetCategory
+    - submittedBy : EventOrganizer
+    - vendor : String
+    - amount : BigDecimal
+    - description : String
+    - expenseDate : LocalDate
+    - status : ClaimStatus
+    - documents : List<SupportingDocument>
+    - workflow : ApprovalWorkflow
+    - createdAt : LocalDateTime
+    + isEditable() : boolean
+    + getApprovalLevel() : ApprovalLevel
+  }
+
+  class SupportingDocument {
+    - documentId : Long
+    - claim : ExpenseClaim
+    - fileName : String
+    - fileType : String
+    - storageUrl : String
+    - uploadedAt : LocalDateTime
+  }
+
+  class ExpenseCategory {
+    - categoryId : Long
+    - name : String
+    - description : String
+    - rules : List<CategoryRule>
+    + getApplicableRules() : List<CategoryRule>
+  }
+
+  class CategoryRule {
+    - ruleId : Long
+    - category : ExpenseCategory
+    - maxAmount : BigDecimal
+    - requiresMandatoryApproval : boolean
+    - isMandatoryDocumentRequired : boolean
+    - description : String
+    + validate(claim : ExpenseClaim) : boolean
+    + getViolationMessage() : String
+  }
+
+  Budget "1" *-- "1..*" BudgetCategory : contains >
+  Budget "1" o-- "0..*" ExpenseClaim : tracks >
+  BudgetCategory "1" -- "1" ExpenseCategory : references >
+  ExpenseCategory "1" *-- "0..*" CategoryRule : governed by >
+  ExpenseClaim "1" *-- "0..*" SupportingDocument : has >
+  ExpenseClaim "1" -- "1" BudgetCategory : charged to >
+  Event "1" -- "1" Budget : has >
+  Event "1" -- "1" EventOrganizer : organised by >
+}
+
+' ─────────────────────────────────────────
+'  APPROVAL WORKFLOW
+' ─────────────────────────────────────────
+package "model.approval" #FFF8E1 {
+
+  class ApprovalWorkflow {
+    - workflowId : Long
+    - claim : ExpenseClaim
+    - steps : List<ApprovalStep>
+    - currentStepIndex : int
+    - config : WorkflowConfig
+    + getCurrentStep() : ApprovalStep
+    + advance() : void
+    + isComplete() : boolean
+    + isMultiLevel() : boolean
+  }
+
+  class ApprovalStep {
+    - stepId : Long
+    - workflow : ApprovalWorkflow
+    - assignedTo : ApprovingAuthority
+    - stepOrder : int
+    - decision : String
+    - comment : String
+    - decidedAt : LocalDateTime
+    + isDecided() : boolean
+  }
+
+  class WorkflowConfig {
+    - configId : Long
+    - name : String
+    - singleLevelLimit : BigDecimal
+    - multiLevelThreshold : BigDecimal
+    - autoApproveLimit : BigDecimal
+    + resolveLevel(amount : BigDecimal) : ApprovalLevel
+  }
+
+  class AuditLog {
+    - logId : Long
+    - entityType : String
+    - entityId : Long
+    - action : String
+    - performedBy : User
+    - description : String
+    - timestamp : LocalDateTime
+  }
+
+  class Notification {
+    - notificationId : Long
+    - recipient : User
+    - subject : String
+    - message : String
+    - isRead : boolean
+    - sentAt : LocalDateTime
+    + markRead() : void
+  }
+
+  ApprovalWorkflow "1" *-- "1..*" ApprovalStep : has steps >
+  ApprovalWorkflow "1" -- "1" WorkflowConfig : configured by >
+  ApprovalWorkflow "1" -- "1" ExpenseClaim : resolves >
+}
+
+' ─────────────────────────────────────────
+'  STRATEGY PATTERN — Approval Logic
+' ─────────────────────────────────────────
+package "service.strategy" #FCE4EC {
+
+  interface ApprovalStrategy {
+    + resolve(claim : ExpenseClaim) : ApprovalWorkflow
+    + canAutoApprove(claim : ExpenseClaim) : boolean
+    + getApprovalLevel() : ApprovalLevel
+  }
+  note right of ApprovalStrategy
+    Strategy Pattern
+    Swapped at runtime based on
+    expense amount + category type
+  end note
+
+  class SingleLevelApprovalStrategy {
+    - config : WorkflowConfig
+    + resolve(claim : ExpenseClaim) : ApprovalWorkflow
+    + canAutoApprove(claim : ExpenseClaim) : boolean
+    + getApprovalLevel() : ApprovalLevel
+  }
+
+  class MultiLevelApprovalStrategy {
+    - config : WorkflowConfig
+    - approverChain : List<ApprovingAuthority>
+    + resolve(claim : ExpenseClaim) : ApprovalWorkflow
+    + canAutoApprove(claim : ExpenseClaim) : boolean
+    + getApprovalLevel() : ApprovalLevel
+  }
+
+  class AutoApprovalStrategy {
+    - config : WorkflowConfig
+    + resolve(claim : ExpenseClaim) : ApprovalWorkflow
+    + canAutoApprove(claim : ExpenseClaim) : boolean
+    + getApprovalLevel() : ApprovalLevel
+  }
+
+  class VarianceCheckStrategy {
+    + check(category : BudgetCategory) : boolean
+    + getVariancePercent(category : BudgetCategory) : double
+    + shouldAlert(category : BudgetCategory) : boolean
+  }
+
+  ApprovalStrategy <|.. SingleLevelApprovalStrategy
+  ApprovalStrategy <|.. MultiLevelApprovalStrategy
+  ApprovalStrategy <|.. AutoApprovalStrategy
+}
+
+' ─────────────────────────────────────────
+'  FACTORY PATTERN
+' ─────────────────────────────────────────
+package "service.factory" #E0F7FA {
+
+  class ExpenseClaimFactory {
+    + create(budget : Budget, category : BudgetCategory,\n  organizer : EventOrganizer, details : ClaimDetails) : ExpenseClaim
+    + createDraft(budget : Budget, organizer : EventOrganizer) : ExpenseClaim
+  }
+  note right of ExpenseClaimFactory
+    Factory Pattern
+    Encapsulates creation logic,
+    validation, and initial state
+    assignment for ExpenseClaim
+    and ApprovalWorkflow objects
+  end note
+
+  class ApprovalWorkflowFactory {
+    - strategyResolver : ApprovalStrategyResolver
+    + create(claim : ExpenseClaim, config : WorkflowConfig) : ApprovalWorkflow
+    + createStep(workflow : ApprovalWorkflow,\n  approver : ApprovingAuthority, order : int) : ApprovalStep
+  }
+
+  class ApprovalStrategyResolver {
+    - strategies : List<ApprovalStrategy>
+    - config : WorkflowConfig
+    + resolve(claim : ExpenseClaim) : ApprovalStrategy
+  }
+
+  ApprovalWorkflowFactory --> ApprovalStrategyResolver : uses >
+  ApprovalStrategyResolver --> ApprovalStrategy : selects >
+}
+
+' ─────────────────────────────────────────
+'  SERVICE LAYER
+' ─────────────────────────────────────────
+package "service" #F3E5F5 {
+
+  class BudgetService {
+    - budgetRepository : BudgetRepository
+    - auditService : AuditService
+    - notificationService : NotificationService
+    + createBudget(organizer : EventOrganizer, request : CreateBudgetRequest) : Budget
+    + submitForApproval(budgetId : Long) : Budget
+    + approveBudget(budgetId : Long, approver : ApprovingAuthority) : Budget
+    + rejectBudget(budgetId : Long, reason : String) : Budget
+    + getBudgetStatus(budgetId : Long) : BudgetStatus
+  }
+
+  class ExpenseClaimService {
+    - claimRepository : ClaimRepository
+    - factory : ExpenseClaimFactory
+    - varianceStrategy : VarianceCheckStrategy
+    - notificationService : NotificationService
+    + submitClaim(budget : Budget, request : SubmitClaimRequest) : ExpenseClaim
+    + saveDraft(budget : Budget, request : SubmitClaimRequest) : ExpenseClaim
+    + validateAgainstRules(claim : ExpenseClaim) : void
+    + checkVarianceAlert(category : BudgetCategory) : void
+  }
+
+  class ApprovalService {
+    - workflowRepository : WorkflowRepository
+    - workflowFactory : ApprovalWorkflowFactory
+    - notificationService : NotificationService
+    - auditService : AuditService
+    + initiateWorkflow(claim : ExpenseClaim) : ApprovalWorkflow
+    + approve(claimId : Long, approver : ApprovingAuthority, comment : String) : void
+    + reject(claimId : Long, approver : ApprovingAuthority, reason : String) : void
+    + requestInfo(claimId : Long, approver : ApprovingAuthority, query : String) : void
+    + bulkApprove(claimIds : List<Long>, approver : ApprovingAuthority) : void
+    + delegate(claimId : Long, from : ApprovingAuthority, to : ApprovingAuthority) : void
+  }
+
+  class FinanceAdminService {
+    - budgetRepository : BudgetRepository
+    - reportService : ReportService
+    - notificationService : NotificationService
+    + closeBudget(budgetId : Long, admin : FinanceAdmin) : BudgetSummary
+    + forceClose(budgetId : Long, reason : String) : BudgetSummary
+    + configureWorkflow(config : WorkflowConfig) : void
+    + defineCategory(request : CategoryRequest) : ExpenseCategory
+    + defineRule(categoryId : Long, rule : CategoryRule) : void
+  }
+
+  class ReportService {
+    + generateBudgetSummary(budget : Budget) : BudgetSummary
+    + exportPDF(budget : Budget) : byte[]
+    + exportCSV(budget : Budget) : byte[]
+    + generateVarianceReport(budget : Budget) : VarianceReport
+  }
+
+  class NotificationService {
+    - notificationRepository : NotificationRepository
+    + notify(recipient : User, subject : String, message : String) : void
+    + notifyBudgetVariance(organizer : EventOrganizer, category : BudgetCategory) : void
+    + notifyApprovalRequired(approver : ApprovingAuthority, claim : ExpenseClaim) : void
+    + notifyClaimDecision(organizer : EventOrganizer, claim : ExpenseClaim) : void
+  }
+
+  class AuditService {
+    - auditLogRepository : AuditLogRepository
+    + log(entity : String, entityId : Long, action : String,\n  performer : User, description : String) : void
+  }
+}
+
+' ─────────────────────────────────────────
+'  CROSS-PACKAGE RELATIONSHIPS
+' ─────────────────────────────────────────
+
+BudgetService ..> Budget : manages >
+BudgetService ..> NotificationService : uses >
+BudgetService ..> AuditService : uses >
+
+ExpenseClaimService ..> ExpenseClaim : manages >
+ExpenseClaimService ..> ExpenseClaimFactory : uses >
+ExpenseClaimService ..> VarianceCheckStrategy : uses >
+ExpenseClaimService ..> NotificationService : uses >
+
+ApprovalService ..> ApprovalWorkflow : manages >
+ApprovalService ..> ApprovalWorkflowFactory : uses >
+ApprovalService ..> NotificationService : uses >
+ApprovalService ..> AuditService : uses >
+
+FinanceAdminService ..> Budget : closes >
+FinanceAdminService ..> ReportService : uses >
+FinanceAdminService ..> NotificationService : uses >
+
+ApprovalWorkflowFactory ..> ApprovalWorkflow : creates >
+ApprovalWorkflowFactory ..> ApprovalStep : creates >
+ExpenseClaimFactory ..> ExpenseClaim : creates >
+
+@enduml

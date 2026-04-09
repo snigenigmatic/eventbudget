@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mvn compile:*)",
+      "Bash(mvn test:*)",
+      "Bash(mvn spring-boot:run -q)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:8080/)",
+      "Bash(python3 --version)",
+      "Bash(python --version)",
+      "Bash(python3:*)",
+      "Bash(mvnw.cmd -Dmaven.repo.local=.m2 test -q)",
+      "Bash(cmd.exe /c \"mvnw.cmd -Dmaven.repo.local=.m2 test -q 2>&1\")",
+      "Read(//mnt/c/Kaustubh/Sem-6/OOAD/**)",
+      "Bash(./mvnw -Dmaven.repo.local=.m2 test -q)",
+      "Read(//mnt/c/**)"
+    ]
+  }
+}

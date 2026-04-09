@@ -60,10 +60,16 @@ public class BudgetCategory {
 
     public void releaseCommitted(BigDecimal amount) {
         this.committedAmount = this.committedAmount.subtract(amount);
+        if (this.committedAmount.compareTo(BigDecimal.ZERO) < 0) {
+            this.committedAmount = BigDecimal.ZERO;
+        }
     }
 
     public void approveCommitted(BigDecimal amount) {
         this.committedAmount = this.committedAmount.subtract(amount);
+        if (this.committedAmount.compareTo(BigDecimal.ZERO) < 0) {
+            this.committedAmount = BigDecimal.ZERO;
+        }
         this.approvedExpenditure = this.approvedExpenditure.add(amount);
     }
 

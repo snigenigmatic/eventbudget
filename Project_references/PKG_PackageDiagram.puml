@@ -1,0 +1,207 @@
+@startuml PKG_PackageDiagram
+
+skinparam packageFontSize 13
+skinparam packageFontName Arial
+skinparam packageBorderColor #555555
+skinparam componentFontSize 12
+skinparam componentFontName Arial
+skinparam componentBorderColor #555555
+skinparam componentBackgroundColor #FAFAFA
+skinparam arrowColor #444444
+skinparam arrowFontSize 11
+skinparam arrowFontName Arial
+skinparam noteFontSize 11
+skinparam noteFontName Arial
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+skinparam shadowing false
+skinparam dpi 150
+skinparam linetype ortho
+
+title Package Diagram — com.eventbudget
+
+package "com.eventbudget" #F5F5F5 {
+
+  package "config" #E8EAF6 {
+    [SecurityConfig]
+    [JwtConfig]
+    [AppConfig]
+    note bottom
+      Spring Boot configuration.
+      JWT secret, CORS, Bean definitions,
+      Security filter chain setup.
+    end note
+  }
+
+  package "model" #ECEFF1 {
+
+    package "model.user" #E3F2FD {
+      [User]
+      [EventOrganizer]
+      [ApprovingAuthority]
+      [FinanceAdmin]
+      [UserRole <<enum>>]
+    }
+
+    package "model.domain" #E8F5E9 {
+      [Event]
+      [Budget]
+      [BudgetCategory]
+      [ExpenseClaim]
+      [SupportingDocument]
+      [ExpenseCategory]
+      [CategoryRule]
+      [BudgetStatus <<enum>>]
+      [ClaimStatus <<enum>>]
+      [ExportFormat <<enum>>]
+    }
+
+    package "model.approval" #FFF8E1 {
+      [ApprovalWorkflow]
+      [ApprovalStep]
+      [WorkflowConfig]
+      [AuditLog]
+      [Notification]
+      [ApprovalLevel <<enum>>]
+    }
+  }
+
+  package "repository" #E0F7FA {
+    [BudgetRepository]
+    [ClaimRepository]
+    [WorkflowRepository]
+    [UserRepository]
+    [NotificationRepository]
+    [AuditLogRepository]
+    note bottom
+      Spring Data JPA interfaces.
+      Extend JpaRepository<Entity, Long>.
+    end note
+  }
+
+  package "service" #F3E5F5 {
+    [BudgetService]
+    [ExpenseClaimService]
+    [ApprovalService]
+    [FinanceAdminService]
+    [NotificationService]
+    [ReportService]
+    [AuditService]
+
+    package "service.strategy" #FCE4EC {
+      [ApprovalStrategy <<interface>>]
+      [SingleLevelApprovalStrategy]
+      [MultiLevelApprovalStrategy]
+      [AutoApprovalStrategy]
+      [VarianceCheckStrategy]
+      [ApprovalStrategyResolver]
+    }
+
+    package "service.factory" #E0F7FA {
+      [ExpenseClaimFactory]
+      [ApprovalWorkflowFactory]
+    }
+  }
+
+  package "controller" #E8EAF6 {
+    [AuthController]
+    [BudgetController]
+    [ExpenseController]
+    [ApprovalController]
+    [AdminController]
+    note bottom
+      @RestController beans.
+      Annotated with @PreAuthorize
+      for role-based access.
+    end note
+  }
+
+  package "dto" #ECEFF1 {
+    package "dto.request" #F5F5F5 {
+      [CreateBudgetRequest]
+      [SubmitClaimRequest]
+      [ApprovalDecisionRequest]
+      [ClosureRequest]
+      [LoginRequest]
+    }
+    package "dto.response" #F5F5F5 {
+      [BudgetResponse]
+      [ExpenseClaimResponse]
+      [BudgetClosureSummary]
+      [VarianceReport]
+      [AuthResponse]
+    }
+    note bottom
+      DTOs decouple API contract
+      from JPA entity structure.
+    end note
+  }
+
+  package "exception" #FFEBEE {
+    [InsufficientBalanceException]
+    [CategoryRuleViolationException]
+    [PendingClaimsException]
+    [HighVarianceException]
+    [UnauthorizedApproverException]
+    [GlobalExceptionHandler]
+    note bottom
+      @ControllerAdvice handler maps
+      exceptions to HTTP status codes.
+    end note
+  }
+
+  package "security" #FCE4EC {
+    [JwtTokenProvider]
+    [JwtAuthFilter]
+    [UserDetailsServiceImpl]
+    note bottom
+      Generates and validates JWTs.
+      Loaded by Spring Security filter chain.
+    end note
+  }
+
+  package "util" #F5F5F5 {
+    [ReportGenerator]
+    [CsvExporter]
+    [PdfExporter]
+    [DateUtils]
+  }
+}
+
+' ─────────────────────────────────────────
+'  DEPENDENCY RELATIONSHIPS
+' ─────────────────────────────────────────
+
+[AuthController] ..> [BudgetService] : uses
+[BudgetController] ..> [BudgetService] : uses
+[ExpenseController] ..> [ExpenseClaimService] : uses
+[ApprovalController] ..> [ApprovalService] : uses
+[AdminController] ..> [FinanceAdminService] : uses
+
+[BudgetService] ..> [BudgetRepository] : uses
+[ExpenseClaimService] ..> [ClaimRepository] : uses
+[ApprovalService] ..> [WorkflowRepository] : uses
+[NotificationService] ..> [NotificationRepository] : uses
+[AuditService] ..> [AuditLogRepository] : uses
+
+[BudgetService] ..> [Budget] : manages
+[ExpenseClaimService] ..> [ExpenseClaim] : manages
+[ExpenseClaimService] ..> [ExpenseClaimFactory] : uses
+[ExpenseClaimService] ..> [VarianceCheckStrategy] : uses
+[ApprovalService] ..> [ApprovalWorkflowFactory] : uses
+
+[JwtAuthFilter] ..> [JwtTokenProvider] : uses
+[JwtAuthFilter] ..> [UserDetailsServiceImpl] : uses
+[SecurityConfig] ..> [JwtAuthFilter] : configures
+
+[BudgetController] ..> [CreateBudgetRequest] : receives
+[BudgetController] ..> [BudgetResponse] : returns
+[ExpenseController] ..> [SubmitClaimRequest] : receives
+[ApprovalController] ..> [ApprovalDecisionRequest] : receives
+[AdminController] ..> [ClosureRequest] : receives
+[AdminController] ..> [BudgetClosureSummary] : returns
+
+[ReportService] ..> [PdfExporter] : uses
+[ReportService] ..> [CsvExporter] : uses
+
+@enduml

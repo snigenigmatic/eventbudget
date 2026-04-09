@@ -1,0 +1,48 @@
+• Run
+
+  From C:\Kaustubh\Sem-6\OOAD\eventbudget, use the wrapper on Windows:
+
+  mvnw.cmd -Dmaven.repo.local=.m2 test
+  mvnw.cmd -Dmaven.repo.local=.m2 spring-boot:run
+
+  The app should come up on http://localhost:8080, and H2 is at http://localhost:8080/h2-console.
+
+  I already verified the automated test suite passes with:
+
+  mvn -Dmaven.repo.local=.m2 test -q
+
+  The end-to-end test is in src/test/java/com/eventbudget/EventbudgetApplicationTests.java.
+
+  Seeded Users
+
+  All seeded users use password123.
+
+  - Organizer: organizer@eventbudget.local
+  - Approver: coordinator@eventbudget.local
+  - Approver: dean@eventbudget.local
+  - Finance: finance@eventbudget.local
+
+  Quick Manual Test
+
+  1. Login as organizer:
+
+  curl.exe -X POST http://localhost:8080/api/auth/login ^
+    -H "Content-Type: application/json" ^
+    -d "{\"email\":\"organizer@eventbudget.local\",\"password\":\"password123\"}"
+
+  2. Use the returned token to list categories:
+
+  curl.exe http://localhost:8080/api/catalog/expense-categories ^
+    -H "Authorization: Bearer YOUR_TOKEN"
+
+  3. Then test the main flow:
+
+  - POST /api/organizer/events
+  - POST /api/organizer/budgets
+  - login as approver
+  - GET /api/approver/budgets/pending
+  - POST /api/approver/budgets/{budgetId}/decision
+
+  One note: in my sandbox, spring-boot:run itself tried to fetch extra Maven plugin artifacts and was blocked by network restrictions. That
+  was a sandbox limitation, not a code/test failure. On your machine with internet, the command above should work.
+To continue this session, run codex resume 019d6670-583b-74f3-a8e9-688b7015724e

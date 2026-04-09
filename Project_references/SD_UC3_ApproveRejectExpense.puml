@@ -1,0 +1,269 @@
+@startuml SD_UC3_ApproveRejectExpense
+
+skinparam sequenceMessageAlign center
+skinparam sequenceArrowFontSize 11
+skinparam sequenceArrowColor #444444
+skinparam sequenceLifeLineBorderColor #555555
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceParticipantFontSize 13
+skinparam sequenceParticipantFontName Arial
+skinparam sequenceActorBorderColor #555555
+skinparam sequenceActorBackgroundColor #E3F2FD
+skinparam sequenceGroupBorderColor #888888
+skinparam sequenceGroupFontSize 12
+skinparam sequenceGroupFontName Arial
+skinparam noteFontSize 11
+skinparam noteFontName Arial
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+skinparam shadowing false
+skinparam dpi 150
+
+title UC3 — Approve or Reject Expense
+
+actor "Approving Authority" as AA
+participant "ApprovalController" as AC #E8EAF6
+participant "ApprovalService" as ApS #F3E5F5
+participant "ApprovalWorkflow" as AW #FFF8E1
+participant "ApprovalStep" as AStep #FFF8E1
+participant "BudgetCategory" as BCat #E8F5E9
+participant "ExpenseClaim" as EC #E8F5E9
+participant "AuditService" as AS #F3E5F5
+participant "NotificationService" as NS #F3E5F5
+actor "Event Organizer" as EO
+actor "Next Approver" as NA
+
+== Normal Flow — Single Level Approval ==
+
+AA -> AC : POST /api/approvals/{claimId}/approve\n(ApprovalDecisionRequest)
+activate AC
+
+AC -> ApS : approve(claimId, approver, comment)
+activate ApS
+
+ApS -> ApS : verifyAuthorization(approver, claim)
+note right
+  Checks approver.authorizationLimit
+  >= claim.amount
+end note
+
+ApS -> AW : getCurrentStep()
+activate AW
+AW --> ApS : currentStep
+deactivate AW
+
+ApS -> AStep : resolve(APPROVED, comment)
+activate AStep
+AStep --> ApS : ok
+deactivate AStep
+
+ApS -> AW : advance()
+activate AW
+AW -> AW : isComplete()
+AW --> ApS : complete = true
+deactivate AW
+
+ApS -> BCat : approveCommitted(claim.amount)
+activate BCat
+note right
+  committedAmount -= amount
+  approvedExpenditure += amount
+end note
+BCat --> ApS : ok
+deactivate BCat
+
+ApS -> EC : setStatus(APPROVED)
+activate EC
+EC --> ApS : ok
+deactivate EC
+
+ApS -> AS : log("ExpenseClaim", claimId,\n"APPROVED", approver, comment)
+activate AS
+AS --> ApS : ok
+deactivate AS
+
+ApS -> NS : notifyClaimDecision(organizer, claim)
+activate NS
+NS --> ApS : ok
+deactivate NS
+
+ApS --> AC : ok
+deactivate ApS
+
+AC --> AA : 200 OK\n"Expense approved"
+deactivate AC
+
+NS -> EO : Notification\n"Your expense claim has been approved"
+
+== Alternate Flow A1 — Multi-Level Approval ==
+
+AA -> AC : POST /api/approvals/{claimId}/approve\n(ApprovalDecisionRequest)
+activate AC
+
+AC -> ApS : approve(claimId, approver, comment)
+activate ApS
+
+ApS -> ApS : verifyAuthorization(approver, claim)
+
+ApS -> AW : getCurrentStep()
+activate AW
+AW --> ApS : currentStep (step 1 of 2)
+deactivate AW
+
+ApS -> AStep : resolve(APPROVED, comment)
+activate AStep
+AStep --> ApS : ok
+deactivate AStep
+
+ApS -> AW : advance()
+activate AW
+AW -> AW : isComplete()
+AW --> ApS : complete = false\n(more steps remain)
+deactivate AW
+
+note over ApS
+  Not yet final approval —
+  route to next approver
+end note
+
+ApS -> AW : getCurrentStep()
+activate AW
+AW --> ApS : nextStep (step 2 of 2)
+deactivate AW
+
+ApS -> NS : notifyApprovalRequired(nextApprover, claim)
+activate NS
+NS --> ApS : ok
+deactivate NS
+
+ApS -> AS : log("ExpenseClaim", claimId,\n"FORWARDED", approver, "routed to next level")
+activate AS
+AS --> ApS : ok
+deactivate AS
+
+ApS --> AC : ok
+deactivate ApS
+
+AC --> AA : 200 OK\n"Forwarded to next approver"
+deactivate AC
+
+NS -> NA : Notification\n"Expense claim escalated to you for approval"
+
+== Normal Flow — Reject Expense ==
+
+AA -> AC : POST /api/approvals/{claimId}/reject\n(ApprovalDecisionRequest + reason)
+activate AC
+
+AC -> ApS : reject(claimId, approver, reason)
+activate ApS
+
+ApS -> ApS : verifyAuthorization(approver, claim)
+
+ApS -> AStep : resolve(REJECTED, reason)
+activate AStep
+AStep --> ApS : ok
+deactivate AStep
+
+ApS -> BCat : releaseCommitted(claim.amount)
+activate BCat
+note right
+  committedAmount -= amount
+  availableBalance restored
+end note
+BCat --> ApS : ok
+deactivate BCat
+
+ApS -> EC : setStatus(REJECTED)
+activate EC
+EC --> ApS : ok
+deactivate EC
+
+ApS -> AS : log("ExpenseClaim", claimId,\n"REJECTED", approver, reason)
+activate AS
+AS --> ApS : ok
+deactivate AS
+
+ApS -> NS : notifyClaimDecision(organizer, claim)
+activate NS
+NS --> ApS : ok
+deactivate NS
+
+ApS --> AC : ok
+deactivate ApS
+
+AC --> AA : 200 OK\n"Expense rejected"
+deactivate AC
+
+NS -> EO : Notification\n"Your expense claim was rejected: <reason>"
+
+== Alternate Flow A2 — Request Additional Information ==
+
+AA -> AC : POST /api/approvals/{claimId}/request-info\n(query)
+activate AC
+
+AC -> ApS : requestInfo(claimId, approver, query)
+activate ApS
+
+ApS -> EC : setStatus(INFO_REQUESTED)
+activate EC
+EC --> ApS : ok
+deactivate EC
+
+note over ApS
+  Claim removed from approver queue.
+  Budget amount stays committed.
+  Organizer must respond before
+  claim re-enters approval flow.
+end note
+
+ApS -> NS : notifyClaimDecision(organizer, claim)
+activate NS
+NS --> ApS : ok
+deactivate NS
+
+ApS -> AS : log("ExpenseClaim", claimId,\n"INFO_REQUESTED", approver, query)
+activate AS
+AS --> ApS : ok
+deactivate AS
+
+ApS --> AC : ok
+deactivate ApS
+
+AC --> AA : 200 OK\n"Information requested from organizer"
+deactivate AC
+
+NS -> EO : Notification\n"Additional info requested: <query>"
+
+== Alternate Flow A3 — Delegate Approval ==
+
+AA -> AC : POST /api/approvals/{claimId}/delegate\n(delegateId)
+activate AC
+
+AC -> ApS : delegate(claimId, fromApprover, toApprover)
+activate ApS
+
+ApS -> AStep : reassignTo(toApprover)
+activate AStep
+AStep --> ApS : ok
+deactivate AStep
+
+ApS -> AS : log("ExpenseClaim", claimId,\n"DELEGATED", fromApprover, toApprover.name)
+activate AS
+AS --> ApS : ok
+deactivate AS
+
+ApS -> NS : notifyApprovalRequired(toApprover, claim)
+activate NS
+NS --> ApS : ok
+deactivate NS
+
+ApS --> AC : ok
+deactivate ApS
+
+AC --> AA : 200 OK\n"Approval delegated"
+deactivate AC
+
+NS -> NA : Notification\n"Approval delegated to you"
+
+@enduml
