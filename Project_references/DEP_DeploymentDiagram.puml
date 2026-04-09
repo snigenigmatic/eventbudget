@@ -1,0 +1,153 @@
+@startuml DEP_DeploymentDiagram
+
+skinparam nodeFontSize 13
+skinparam nodeFontName Arial
+skinparam nodeBorderColor #555555
+skinparam nodeBackgroundColor #FAFAFA
+skinparam componentFontSize 12
+skinparam componentFontName Arial
+skinparam componentBorderColor #555555
+skinparam componentBackgroundColor #FAFAFA
+skinparam arrowColor #444444
+skinparam arrowFontSize 11
+skinparam arrowFontName Arial
+skinparam noteFontSize 11
+skinparam noteFontName Arial
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+skinparam shadowing false
+skinparam dpi 150
+skinparam linetype ortho
+
+title Deployment Diagram — Event Budget Planning & Expense Approval System
+
+' ─────────────────────────────────────────
+'  CLIENT NODE
+' ─────────────────────────────────────────
+node "Client Device\n(Laptop / Desktop)" as ClientNode #E3F2FD {
+  [Web Browser] as Browser
+  note right of Browser
+    Organizer, Approver,
+    Finance Admin access
+    system via browser.
+  end note
+}
+
+' ─────────────────────────────────────────
+'  APPLICATION SERVER NODE
+' ─────────────────────────────────────────
+node "Application Server\n(Ubuntu 24 / AWS EC2)" as AppNode #F3E5F5 {
+
+  node "JVM Runtime\n(Java 21)" as JVM #FCE4EC {
+
+    [Spring Boot Application\n(eventbudget.jar)] as SpringApp
+
+    component "Embedded Tomcat\n(port 8080)" as Tomcat
+
+    component "Spring Security\n+ JWT Filter" as Security
+
+    component "Controller Layer\n(REST Endpoints)" as Controllers
+
+    component "Service Layer\n(Business Logic)" as Services
+
+    component "Strategy + Factory\n(Design Patterns)" as Patterns
+
+    component "Repository Layer\n(Spring Data JPA)" as Repositories
+
+    SpringApp --> Tomcat
+    Tomcat --> Security
+    Security --> Controllers
+    Controllers --> Services
+    Services --> Patterns
+    Services --> Repositories
+  }
+
+  note right of JVM
+    Packaged as executable JAR.
+    Deployed via: java -jar eventbudget.jar
+    Spring profiles: dev / prod
+  end note
+}
+
+' ─────────────────────────────────────────
+'  DATABASE SERVER NODE
+' ─────────────────────────────────────────
+node "Database Server\n(AWS RDS / Local MySQL)" as DBNode #E8F5E9 {
+
+  database "MySQL 8.x\n(eventbudget_db)" as MySQL {
+    [users]
+    [events]
+    [budgets]
+    [budget_categories]
+    [expense_claims]
+    [approval_workflows]
+    [approval_steps]
+    [expense_categories]
+    [category_rules]
+    [audit_logs]
+    [notifications]
+  }
+
+  note right of MySQL
+    Port 3306.
+    Credentials managed via
+    application.properties /
+    environment variables.
+  end note
+}
+
+' ─────────────────────────────────────────
+'  FILE STORAGE NODE
+' ─────────────────────────────────────────
+node "File Storage\n(Local FS / AWS S3)" as StorageNode #FFF8E1 {
+  [Document Store] as DocStore
+  note right of DocStore
+    Stores uploaded
+    SupportingDocuments
+    (invoices, receipts).
+    Referenced by storageUrl
+    in the DB record.
+  end note
+}
+
+' ─────────────────────────────────────────
+'  EXTERNAL SERVICES
+' ─────────────────────────────────────────
+node "External Email Service\n(SMTP / SendGrid)" as EmailNode #ECEFF1 {
+  [Email Server] as EmailServer
+  note right of EmailServer
+    Sends approval notifications,
+    variance alerts, and
+    budget closure reports.
+  end note
+}
+
+' ─────────────────────────────────────────
+'  COMMUNICATION PATHS
+' ─────────────────────────────────────────
+Browser --> AppNode : HTTPS / REST API\n(port 443 → 8080)
+
+AppNode --> DBNode : JDBC over TCP\n(port 3306)\nHibernate / Spring Data JPA
+
+AppNode --> StorageNode : File I/O\n(local) or S3 SDK\n(HTTPS / port 443)
+
+AppNode --> EmailNode : SMTP\n(port 587 / TLS)
+
+' ─────────────────────────────────────────
+'  NOTES
+' ─────────────────────────────────────────
+note bottom of AppNode
+  Single deployable artifact.
+  Horizontal scaling possible via
+  load balancer + multiple instances
+  with shared DB and storage.
+end note
+
+note bottom of DBNode
+  Connection pool managed by
+  HikariCP (Spring Boot default).
+  Max pool size configurable via
+  spring.datasource.hikari.maximum-pool-size
+end note
+
+@enduml

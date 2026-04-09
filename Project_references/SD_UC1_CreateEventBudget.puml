@@ -1,0 +1,133 @@
+@startuml SD_UC1_CreateEventBudget
+
+skinparam sequenceMessageAlign center
+skinparam sequenceArrowFontSize 11
+skinparam sequenceArrowColor #444444
+skinparam sequenceLifeLineBorderColor #555555
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceParticipantFontSize 13
+skinparam sequenceParticipantFontName Arial
+skinparam sequenceActorBorderColor #555555
+skinparam sequenceActorBackgroundColor #E3F2FD
+skinparam sequenceGroupBorderColor #888888
+skinparam sequenceGroupFontSize 12
+skinparam sequenceGroupFontName Arial
+skinparam noteFontSize 11
+skinparam noteFontName Arial
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+skinparam shadowing false
+skinparam dpi 150
+
+title UC1 — Create Event Budget
+
+actor "Event Organizer" as EO
+participant "BudgetController" as BC #E8EAF6
+participant "BudgetService" as BS #F3E5F5
+participant "Budget" as B #E8F5E9
+participant "BudgetCategory" as BCat #E8F5E9
+participant "AuditService" as AS #F3E5F5
+participant "NotificationService" as NS #F3E5F5
+actor "Approving Authority" as AA
+
+== Normal Flow ==
+
+EO -> BC : POST /api/budgets\n(CreateBudgetRequest)
+activate BC
+
+BC -> BS : createBudget(organizer, request)
+activate BS
+
+BS -> B : new Budget(event, totalAmount)
+activate B
+B --> BS : budget
+deactivate B
+
+loop for each category allocation
+  BS -> BCat : new BudgetCategory(budget, expenseCategory, allocatedAmount)
+  activate BCat
+  BCat --> BS : budgetCategory
+  deactivate BCat
+end
+
+BS -> BS : validateCategoryAllocations()
+note right
+  sum(allocatedAmounts)
+  must equal totalAmount
+end note
+
+BS -> B : setStatus(PENDING_APPROVAL)
+activate B
+B --> BS : ok
+deactivate B
+
+BS -> AS : log("Budget", budgetId,\n"CREATED", organizer, details)
+activate AS
+AS --> BS : ok
+deactivate AS
+
+BS -> NS : notifyApprovalRequired(approver, budget)
+activate NS
+NS --> BS : ok
+deactivate NS
+
+BS --> BC : budget
+deactivate BS
+
+BC --> EO : 201 Created\n(BudgetResponse)
+deactivate BC
+
+NS -> AA : Email / In-app notification\n"New budget pending approval"
+
+== Alternate Flow A1 — Allocation Mismatch ==
+
+EO -> BC : POST /api/budgets\n(invalid allocations)
+activate BC
+
+BC -> BS : createBudget(organizer, request)
+activate BS
+
+BS -> BS : validateCategoryAllocations()
+
+BS --x BC : AllocationMismatchException\n(difference amount)
+deactivate BS
+
+BC --> EO : 400 Bad Request\n"Category allocations do not sum to total budget"
+deactivate BC
+
+== Alternate Flow A2 — Save as Draft ==
+
+EO -> BC : POST /api/budgets/draft\n(CreateBudgetRequest)
+activate BC
+
+BC -> BS : saveDraft(organizer, request)
+activate BS
+
+BS -> B : new Budget(event, totalAmount)
+activate B
+B --> BS : budget
+deactivate B
+
+BS -> B : setStatus(DRAFT)
+activate B
+B --> BS : ok
+deactivate B
+
+note over BS
+  No approval workflow triggered.
+  No notification sent.
+end note
+
+BS -> AS : log("Budget", budgetId,\n"DRAFT_SAVED", organizer, details)
+activate AS
+AS --> BS : ok
+deactivate AS
+
+BS --> BC : budget (DRAFT)
+deactivate BS
+
+BC --> EO : 201 Created\n(BudgetResponse — status: DRAFT)
+deactivate BC
+
+@enduml

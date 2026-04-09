@@ -1,0 +1,154 @@
+@startuml SM_StateMachine
+
+skinparam stateFontSize 13
+skinparam stateFontName Arial
+skinparam stateArrowFontSize 11
+skinparam stateArrowFontName Arial
+skinparam stateArrowColor #444444
+skinparam stateBorderColor #555555
+skinparam stateBackgroundColor #FAFAFA
+skinparam stateStartColor #37474F
+skinparam stateEndColor #37474F
+skinparam noteFontSize 11
+skinparam noteFontName Arial
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+skinparam shadowing false
+skinparam dpi 150
+
+title State Machine Diagram — Budget & ExpenseClaim
+
+' ─────────────────────────────────────────
+'  BUDGET STATE MACHINE
+' ─────────────────────────────────────────
+
+state "Budget States" as BudgetSM {
+
+  [*] --> DRAFT : EventOrganizer creates budget\n[save as draft]
+
+  DRAFT : entry / assign budgetId
+  DRAFT : do / allow category edits
+  DRAFT : do / allow amount changes
+
+  DRAFT --> PENDING_APPROVAL : EventOrganizer submits\n[allocations sum == totalAmount]
+  DRAFT --> DRAFT : EventOrganizer updates\n[re-validate allocations]
+
+  PENDING_APPROVAL : entry / notify ApprovingAuthority
+  PENDING_APPROVAL : do / lock category edits
+  PENDING_APPROVAL : do / await approver decision
+
+  PENDING_APPROVAL --> APPROVED : ApprovingAuthority approves\n[authorizationLimit >= budget amount]
+  PENDING_APPROVAL --> REJECTED : ApprovingAuthority rejects\n[reason provided]
+  PENDING_APPROVAL --> PENDING_APPROVAL : ApprovingAuthority requests\nhigher-level review
+
+  APPROVED : entry / notify EventOrganizer
+  APPROVED : do / accept expense claims
+  APPROVED : do / track committed amounts
+
+  APPROVED --> CLOSED : FinanceAdmin closes budget\n[event concluded &&\nno pending claims &&\nvariance justified]
+
+  REJECTED : entry / notify EventOrganizer with reason
+  REJECTED : do / allow organizer to revise
+
+  REJECTED --> PENDING_APPROVAL : EventOrganizer revises\nand resubmits
+
+  CLOSED : entry / generate final summary
+  CLOSED : entry / notify organizer + finance committee
+  CLOSED : do / read-only — no modifications
+  CLOSED : do / mark unspent for reallocation
+
+  CLOSED --> [*]
+
+  note right of DRAFT
+    Initial state on creation.
+    No approval workflow triggered.
+    Organizer can freely edit.
+  end note
+
+  note right of APPROVED
+    ExpenseClaims can only be
+    submitted against budgets
+    in APPROVED state.
+  end note
+
+  note right of CLOSED
+    Terminal state.
+    Budget.isClosed() == true.
+    All expense submissions blocked.
+  end note
+}
+
+' ─────────────────────────────────────────
+'  EXPENSE CLAIM STATE MACHINE
+' ─────────────────────────────────────────
+
+state "ExpenseClaim States" as ClaimSM {
+
+  [*] --> DRAFT : EventOrganizer saves\nexpense as draft
+
+  DRAFT : entry / assign claimId
+  DRAFT : do / no budget committed
+  DRAFT : do / no workflow triggered
+  DRAFT : do / allow edits
+
+  DRAFT --> PENDING_APPROVAL : EventOrganizer submits\n[rules pass && balance sufficient\n&& documents uploaded]
+  DRAFT --> DRAFT : EventOrganizer updates draft
+
+  PENDING_APPROVAL : entry / commitAmount in BudgetCategory
+  PENDING_APPROVAL : entry / build ApprovalWorkflow
+  PENDING_APPROVAL : entry / notify ApprovingAuthority
+  PENDING_APPROVAL : do / amount locked as committed
+  PENDING_APPROVAL : do / await approver decision
+
+  PENDING_APPROVAL --> APPROVED : ApprovingAuthority approves\n[all workflow steps complete]
+  PENDING_APPROVAL --> REJECTED : ApprovingAuthority rejects\n[reason provided]
+  PENDING_APPROVAL --> INFO_REQUESTED : ApprovingAuthority requests\nadditional information
+  PENDING_APPROVAL --> PENDING_APPROVAL : Multi-level: forwarded\nto next approver in chain
+
+  INFO_REQUESTED : entry / notify EventOrganizer with query
+  INFO_REQUESTED : do / removed from approver queue
+  INFO_REQUESTED : do / committed amount stays locked
+
+  INFO_REQUESTED --> PENDING_APPROVAL : EventOrganizer provides info\nand resubmits\n[returned to approver queue]
+
+  APPROVED : entry / convert committedAmount\nto approvedExpenditure
+  APPROVED : entry / notify EventOrganizer
+  APPROVED : do / amount reflected in\nBudgetCategory.approvedExpenditure
+
+  APPROVED --> [*]
+
+  REJECTED : entry / releaseCommitted in BudgetCategory
+  REJECTED : entry / notify EventOrganizer with reason
+  REJECTED : do / available balance restored
+
+  REJECTED --> PENDING_APPROVAL : EventOrganizer revises\nand resubmits
+
+  REJECTED --> [*]
+
+  note right of PENDING_APPROVAL
+    BudgetCategory.committedAmount
+    tracks locked funds throughout
+    the approval lifecycle.
+  end note
+
+  note right of INFO_REQUESTED
+    Committed amount NOT released.
+    Funds remain locked until
+    final approve or reject decision.
+  end note
+
+  note right of APPROVED
+    committedAmount -= claim.amount
+    approvedExpenditure += claim.amount
+    Net effect on budget: zero shift,
+    just reclassification.
+  end note
+
+  note right of REJECTED
+    committedAmount -= claim.amount
+    availableBalance restored.
+    Organizer may revise and resubmit.
+  end note
+}
+
+@enduml

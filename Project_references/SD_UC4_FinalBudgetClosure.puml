@@ -1,0 +1,255 @@
+@startuml SD_UC4_FinalBudgetClosure
+
+skinparam sequenceMessageAlign center
+skinparam sequenceArrowFontSize 11
+skinparam sequenceArrowColor #444444
+skinparam sequenceLifeLineBorderColor #555555
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceParticipantFontSize 13
+skinparam sequenceParticipantFontName Arial
+skinparam sequenceActorBorderColor #555555
+skinparam sequenceActorBackgroundColor #E3F2FD
+skinparam sequenceGroupBorderColor #888888
+skinparam sequenceGroupFontSize 12
+skinparam sequenceGroupFontName Arial
+skinparam noteFontSize 11
+skinparam noteFontName Arial
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+skinparam shadowing false
+skinparam dpi 150
+
+title UC4 — Final Budget Closure
+
+actor "Finance Admin" as FA
+participant "AdminController" as ADC #E8EAF6
+participant "FinanceAdminService" as FAS #F3E5F5
+participant "Budget" as B #E8F5E9
+participant "BudgetCategory" as BCat #E8F5E9
+participant "ReportService" as RS #F3E5F5
+participant "AuditService" as AS #F3E5F5
+participant "NotificationService" as NS #F3E5F5
+actor "Event Organizer" as EO
+actor "Finance Committee" as FC
+
+== Normal Flow ==
+
+FA -> ADC : POST /api/admin/budgets/{budgetId}/close\n(ClosureRequest)
+activate ADC
+
+ADC -> FAS : closeBudget(budgetId, admin)
+activate FAS
+
+FAS -> B : isEligibleForClosure()
+activate B
+note right
+  Checks:
+  event.hasConcluded() == true
+  budget.status == APPROVED
+  budget.hasNoPendingClaims() == true
+end note
+B --> FAS : eligible = true
+deactivate B
+
+FAS -> B : getTotalAllocated()
+activate B
+B --> FAS : totalAllocated
+deactivate B
+
+loop for each BudgetCategory
+  FAS -> BCat : getAvailableBalance()
+  activate BCat
+  BCat --> FAS : unspentAmount
+  deactivate BCat
+
+  FAS -> BCat : getUtilizationPercent()
+  activate BCat
+  BCat --> FAS : utilizationPercent
+  deactivate BCat
+end
+
+FAS -> RS : generateBudgetSummary(budget)
+activate RS
+note right
+  Builds BudgetSummary:
+  - allocation vs actual table
+  - variance per category
+  - full expense list
+  - approval timeline
+end note
+RS --> FAS : budgetSummary
+deactivate RS
+
+FAS -> B : setStatus(CLOSED)
+activate B
+B --> FAS : ok
+deactivate B
+
+note over FAS
+  Budget is now read-only.
+  No further expense submissions
+  or modifications allowed.
+end note
+
+FAS -> AS : log("Budget", budgetId,\n"CLOSED", admin, "Final closure")
+activate AS
+AS --> FAS : ok
+deactivate AS
+
+FAS -> NS : notify(organizer, "Budget closed", summary)
+activate NS
+NS --> FAS : ok
+deactivate NS
+
+FAS -> NS : notify(financeCommittee, "Budget closed", summary)
+activate NS
+NS --> FAS : ok
+deactivate NS
+
+FAS --> ADC : budgetSummary
+deactivate FAS
+
+ADC --> FA : 200 OK\n(BudgetClosureSummary)
+deactivate ADC
+
+NS -> EO : Notification + Final Report\n"Event budget has been closed"
+NS -> FC : Notification + Final Report\n"Event budget has been closed"
+
+== Alternate Flow A1 — Pending Approvals Exist ==
+
+FA -> ADC : POST /api/admin/budgets/{budgetId}/close
+activate ADC
+
+ADC -> FAS : closeBudget(budgetId, admin)
+activate FAS
+
+FAS -> B : isEligibleForClosure()
+activate B
+B --> FAS : eligible = false\n(pending claims exist)
+deactivate B
+
+FAS --x ADC : PendingClaimsException\n(list of pending claimIds)
+deactivate FAS
+
+ADC --> FA : 409 Conflict\n"Cannot close: pending expense claims exist\n[claimId1, claimId2, ...]"
+deactivate ADC
+
+== Alternate Flow A2 — High Variance Detected ==
+
+FA -> ADC : POST /api/admin/budgets/{budgetId}/close\n(ClosureRequest)
+activate ADC
+
+ADC -> FAS : closeBudget(budgetId, admin)
+activate FAS
+
+FAS -> B : isEligibleForClosure()
+activate B
+B --> FAS : eligible = true
+deactivate B
+
+loop for each BudgetCategory
+  FAS -> BCat : getUtilizationPercent()
+  activate BCat
+  BCat --> FAS : utilizationPercent
+  deactivate BCat
+end
+
+FAS -> FAS : detectHighVariance(categories)
+note right
+  A2: Categories exceeding
+  ±20% variance flagged.
+  Mandatory explanation required
+  before closure proceeds.
+end note
+
+FAS --x ADC : HighVarianceException\n(flagged categories + variance %)
+deactivate FAS
+
+ADC --> FA : 422 Unprocessable Entity\n"High variance in categories: <list>\nProvide justification to proceed"
+deactivate ADC
+
+== Alternate Flow A3 — Force Close with Pending Expenses ==
+
+FA -> ADC : POST /api/admin/budgets/{budgetId}/force-close\n(ForceClosureRequest + reason)
+activate ADC
+
+ADC -> FAS : forceClose(budgetId, reason)
+activate FAS
+
+FAS -> B : getPendingClaims()
+activate B
+B --> FAS : pendingClaims
+deactivate B
+
+loop for each pending ExpenseClaim
+  FAS -> BCat : releaseCommitted(claim.amount)
+  activate BCat
+  BCat --> FAS : ok
+  deactivate BCat
+
+  FAS -> NS : notifyClaimDecision(organizer, claim\n[auto-rejected: budget force closed])
+  activate NS
+  NS --> FAS : ok
+  deactivate NS
+end
+
+note over FAS
+  A3: All pending claims auto-rejected.
+  Committed amounts released.
+  Organizers notified with reason.
+end note
+
+FAS -> RS : generateBudgetSummary(budget)
+activate RS
+RS --> FAS : budgetSummary
+deactivate RS
+
+FAS -> B : setStatus(CLOSED)
+activate B
+B --> FAS : ok
+deactivate B
+
+FAS -> AS : log("Budget", budgetId,\n"FORCE_CLOSED", admin, reason)
+activate AS
+AS --> FAS : ok
+deactivate AS
+
+FAS -> NS : notify(organizer, "Budget force closed", summary)
+activate NS
+NS --> FAS : ok
+deactivate NS
+
+FAS --> ADC : budgetSummary
+deactivate FAS
+
+ADC --> FA : 200 OK\n(BudgetClosureSummary)
+deactivate ADC
+
+== Alternate Flow A4 — Export Final Report ==
+
+FA -> ADC : GET /api/admin/budgets/{budgetId}/export?format=PDF
+activate ADC
+
+ADC -> FAS : exportFinancialReport(budget, PDF)
+activate FAS
+
+FAS -> RS : exportPDF(budget)
+activate RS
+note right
+  Generates formatted PDF:
+  - Cover page with event details
+  - Category allocation vs actual
+  - Variance analysis charts
+  - Full expense list with statuses
+end note
+RS --> FAS : pdfBytes
+deactivate RS
+
+FAS --> ADC : pdfBytes
+deactivate FAS
+
+ADC --> FA : 200 OK\n(application/pdf attachment)
+deactivate ADC
+
+@enduml

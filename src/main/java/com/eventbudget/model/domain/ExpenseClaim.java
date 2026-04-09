@@ -66,7 +66,7 @@ public class ExpenseClaim {
     }
 
     public ApprovalLevel getApprovalLevel() {
-        if (workflow == null) return null;
+        if (workflow == null || workflow.getSteps().isEmpty()) return ApprovalLevel.AUTO_APPROVED;
         return workflow.isMultiLevel() ? ApprovalLevel.MULTI_LEVEL : ApprovalLevel.SINGLE_LEVEL;
     }
 }

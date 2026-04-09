@@ -1,0 +1,195 @@
+@startuml COMP_ComponentDiagram
+
+skinparam componentFontSize 12
+skinparam componentFontName Arial
+skinparam componentArrowFontSize 11
+skinparam componentArrowFontName Arial
+skinparam componentArrowColor #444444
+skinparam componentBorderColor #555555
+skinparam componentBackgroundColor #FAFAFA
+skinparam componentStyle uml2
+skinparam interfaceFontSize 11
+skinparam interfaceFontName Arial
+skinparam packageFontSize 13
+skinparam packageFontName Arial
+skinparam noteFontSize 11
+skinparam noteFontName Arial
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+skinparam shadowing false
+skinparam dpi 150
+skinparam linetype ortho
+
+title Component Diagram — Event Budget Planning & Expense Approval System
+
+' ─────────────────────────────────────────
+'  CLIENT TIER
+' ─────────────────────────────────────────
+package "Client Tier" #E3F2FD {
+  [Web Browser] as Browser
+  note right of Browser
+    React / Thymeleaf frontend.
+    Communicates via REST over HTTPS.
+  end note
+}
+
+' ─────────────────────────────────────────
+'  APPLICATION TIER — Spring Boot
+' ─────────────────────────────────────────
+package "Application Tier — Spring Boot" #F3E5F5 {
+
+  package "Security Layer" #FCE4EC {
+    [JWT Auth Filter] as JWTFilter
+    [Spring Security Config] as SecConfig
+    [Role-Based Access Control] as RBAC
+    JWTFilter --> SecConfig
+    SecConfig --> RBAC
+  }
+
+  package "Controller Layer" #E8EAF6 {
+    [AuthController] as AuthCtrl
+    [BudgetController] as BudgetCtrl
+    [ExpenseController] as ExpCtrl
+    [ApprovalController] as ApprCtrl
+    [AdminController] as AdminCtrl
+  }
+
+  package "Service Layer" #F3E5F5 {
+    [BudgetService] as BS
+    [ExpenseClaimService] as ECS
+    [ApprovalService] as ApS
+    [FinanceAdminService] as FAS
+    [NotificationService] as NS
+    [ReportService] as RS
+    [AuditService] as AuS
+  }
+
+  package "Strategy & Factory Layer" #FCE4EC {
+    [ApprovalStrategyResolver] as ASR
+    [SingleLevelApprovalStrategy] as SLS
+    [MultiLevelApprovalStrategy] as MLS
+    [AutoApprovalStrategy] as AAS
+    [VarianceCheckStrategy] as VCS
+    [ExpenseClaimFactory] as ECF
+    [ApprovalWorkflowFactory] as AWF
+    ASR --> SLS
+    ASR --> MLS
+    ASR --> AAS
+    AWF --> ASR
+  }
+
+  package "Repository Layer" #E0F7FA {
+    [BudgetRepository] as BR
+    [ClaimRepository] as CR
+    [WorkflowRepository] as WR
+    [NotificationRepository] as NR
+    [AuditLogRepository] as ALR
+    [UserRepository] as UR
+  }
+}
+
+' ─────────────────────────────────────────
+'  DATA TIER
+' ─────────────────────────────────────────
+package "Data Tier" #E8F5E9 {
+  database "MySQL Database" as MySQL {
+    [users]
+    [events]
+    [budgets]
+    [budget_categories]
+    [expense_claims]
+    [supporting_documents]
+    [approval_workflows]
+    [approval_steps]
+    [workflow_configs]
+    [expense_categories]
+    [category_rules]
+    [audit_logs]
+    [notifications]
+  }
+
+  [Document Store\n(File System / S3)] as DocStore
+}
+
+' ─────────────────────────────────────────
+'  EXTERNAL SYSTEMS
+' ─────────────────────────────────────────
+package "External" #ECEFF1 {
+  [Email Service\n(SMTP / SendGrid)] as Email
+}
+
+' ─────────────────────────────────────────
+'  INTERFACES
+' ─────────────────────────────────────────
+interface "REST API\n(HTTPS)" as REST
+interface "JPA / Hibernate" as JPA
+interface "SMTP Interface" as SMTP
+interface "File I/O / S3 SDK" as FileIO
+
+' ─────────────────────────────────────────
+'  CONNECTIONS — Client to Security
+' ─────────────────────────────────────────
+Browser --> REST
+REST --> JWTFilter
+
+' ─────────────────────────────────────────
+'  CONNECTIONS — Security to Controllers
+' ─────────────────────────────────────────
+JWTFilter --> AuthCtrl
+RBAC --> BudgetCtrl
+RBAC --> ExpCtrl
+RBAC --> ApprCtrl
+RBAC --> AdminCtrl
+
+' ─────────────────────────────────────────
+'  CONNECTIONS — Controllers to Services
+' ─────────────────────────────────────────
+BudgetCtrl --> BS
+ExpCtrl --> ECS
+ApprCtrl --> ApS
+AdminCtrl --> FAS
+AuthCtrl --> UR
+
+' ─────────────────────────────────────────
+'  CONNECTIONS — Services to Services
+' ─────────────────────────────────────────
+BS --> NS
+BS --> AuS
+ECS --> ECF
+ECS --> VCS
+ECS --> NS
+ApS --> AWF
+ApS --> NS
+ApS --> AuS
+FAS --> RS
+FAS --> NS
+
+' ─────────────────────────────────────────
+'  CONNECTIONS — Services to Repositories
+' ─────────────────────────────────────────
+BS --> BR
+ECS --> CR
+ApS --> WR
+NS --> NR
+AuS --> ALR
+
+' ─────────────────────────────────────────
+'  CONNECTIONS — Repositories to DB
+' ─────────────────────────────────────────
+BR --> JPA
+CR --> JPA
+WR --> JPA
+NR --> JPA
+ALR --> JPA
+UR --> JPA
+JPA --> MySQL
+
+' ─────────────────────────────────────────
+'  CONNECTIONS — External
+' ─────────────────────────────────────────
+NS --> SMTP
+SMTP --> Email
+RS --> FileIO
+FileIO --> DocStore
+
+@enduml

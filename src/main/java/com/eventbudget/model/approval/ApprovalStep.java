@@ -34,7 +34,7 @@ public class ApprovalStep {
     private ApprovingAuthority assignedTo;
 
     private int stepOrder;
-    private String decision;
+    private String decision = "PENDING";
     private String comment;
     private LocalDateTime decidedAt;
 

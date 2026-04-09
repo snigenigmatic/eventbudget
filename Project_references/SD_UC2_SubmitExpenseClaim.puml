@@ -1,0 +1,204 @@
+@startuml SD_UC2_SubmitExpenseClaim
+
+skinparam sequenceMessageAlign center
+skinparam sequenceArrowFontSize 11
+skinparam sequenceArrowColor #444444
+skinparam sequenceLifeLineBorderColor #555555
+skinparam sequenceParticipantBorderColor #555555
+skinparam sequenceParticipantBackgroundColor #FAFAFA
+skinparam sequenceParticipantFontSize 13
+skinparam sequenceParticipantFontName Arial
+skinparam sequenceActorBorderColor #555555
+skinparam sequenceActorBackgroundColor #E3F2FD
+skinparam sequenceGroupBorderColor #888888
+skinparam sequenceGroupFontSize 12
+skinparam sequenceGroupFontName Arial
+skinparam noteFontSize 11
+skinparam noteFontName Arial
+skinparam NoteBackgroundColor #FFFDE7
+skinparam NoteBorderColor #F9A825
+skinparam shadowing false
+skinparam dpi 150
+
+title UC2 — Submit Expense Claim
+
+actor "Event Organizer" as EO
+participant "ExpenseController" as EC #E8EAF6
+participant "ExpenseClaimService" as ECS #F3E5F5
+participant "ExpenseClaimFactory" as ECF #E0F7FA
+participant "CategoryRule" as CR #E8F5E9
+participant "BudgetCategory" as BCat #E8F5E9
+participant "VarianceCheckStrategy" as VCS #FCE4EC
+participant "ApprovalWorkflowFactory" as AWF #E0F7FA
+participant "ApprovalStrategyResolver" as ASR #E0F7FA
+participant "ApprovalWorkflow" as AW #FFF8E1
+participant "NotificationService" as NS #F3E5F5
+participant "AuditService" as AS #F3E5F5
+actor "Approving Authority" as AA
+
+== Normal Flow ==
+
+EO -> EC : POST /api/expenses\n(SubmitClaimRequest)
+activate EC
+
+EC -> ECS : submitClaim(budget, request)
+activate ECS
+
+ECS -> ECS : checkBudgetOpen(budget)
+note right
+  Rejects if budget.status
+  != APPROVED or isClosed()
+end note
+
+ECS -> ECF : create(budget, category,\n organizer, details)
+activate ECF
+
+ECF -> CR : validate(claim)
+activate CR
+CR --> ECF : RuleValidationResult (pass)
+deactivate CR
+
+ECF --> ECS : expenseClaim
+deactivate ECF
+
+ECS -> BCat : commitAmount(claim.amount)
+activate BCat
+BCat --> ECS : ok
+deactivate BCat
+
+ECS -> VCS : check(budgetCategory)
+activate VCS
+VCS -> VCS : getVariancePercent(category)
+note right
+  utilization = committedAmount
+  / allocatedAmount * 100
+end note
+VCS --> ECS : varianceResult
+deactivate VCS
+
+alt utilization >= 80%
+  ECS -> NS : notifyBudgetVariance(organizer, category)
+  activate NS
+  NS --> ECS : ok
+  deactivate NS
+  note over ECS
+    A4: Budget Variance Alert triggered
+    Notifies organizer + Finance Admin
+  end note
+end
+
+ECS -> AWF : create(claim, workflowConfig)
+activate AWF
+
+AWF -> ASR : resolve(claim)
+activate ASR
+ASR -> ASR : evaluateAmount(claim.amount)
+note right
+  amount <= autoApproveLimit    → AutoApprovalStrategy
+  amount <= singleLevelLimit    → SingleLevelApprovalStrategy
+  amount >  multiLevelThreshold → MultiLevelApprovalStrategy
+end note
+ASR --> AWF : approvalStrategy
+deactivate ASR
+
+AWF -> AW : buildWorkflow(claim, strategy)
+activate AW
+AW --> AWF : approvalWorkflow
+deactivate AW
+
+AWF --> ECS : approvalWorkflow
+deactivate AWF
+
+ECS -> NS : notifyApprovalRequired(approver, claim)
+activate NS
+NS --> ECS : ok
+deactivate NS
+
+ECS -> AS : log("ExpenseClaim", claimId,\n"SUBMITTED", organizer, details)
+activate AS
+AS --> ECS : ok
+deactivate AS
+
+ECS --> EC : expenseClaim (PENDING_APPROVAL)
+deactivate ECS
+
+EC --> EO : 201 Created\n(ExpenseClaimResponse)
+deactivate EC
+
+NS -> AA : Notification\n"New expense claim pending approval"
+
+== Alternate Flow A1 — Category Rule Violation ==
+
+EO -> EC : POST /api/expenses\n(amount exceeds category limit)
+activate EC
+
+EC -> ECS : submitClaim(budget, request)
+activate ECS
+
+ECS -> ECF : create(budget, category, organizer, details)
+activate ECF
+
+ECF -> CR : validate(claim)
+activate CR
+CR --> ECF : RuleValidationResult (FAIL)\n+ violationMessage
+deactivate CR
+
+ECF --x ECS : CategoryRuleViolationException\n(violationMessage)
+deactivate ECF
+
+ECS --x EC : CategoryRuleViolationException
+deactivate ECS
+
+EC --> EO : 422 Unprocessable Entity\n"Expense violates category rule: <reason>"
+deactivate EC
+
+== Alternate Flow A2 — Insufficient Budget Balance ==
+
+EO -> EC : POST /api/expenses\n(amount > available balance)
+activate EC
+
+EC -> ECS : submitClaim(budget, request)
+activate ECS
+
+ECS -> BCat : getAvailableBalance()
+activate BCat
+BCat --> ECS : availableBalance
+deactivate BCat
+
+ECS --x EC : InsufficientBalanceException
+deactivate ECS
+
+EC --> EO : 400 Bad Request\n"Insufficient category balance.\nAvailable: <amount>"
+deactivate EC
+
+== Alternate Flow A3 — Save as Draft ==
+
+EO -> EC : POST /api/expenses/draft\n(SubmitClaimRequest)
+activate EC
+
+EC -> ECS : saveDraft(budget, request)
+activate ECS
+
+ECS -> ECF : createDraft(budget, organizer)
+activate ECF
+ECF --> ECS : expenseClaim (DRAFT)
+deactivate ECF
+
+note over ECS
+  No budget committed.
+  No workflow initiated.
+  No notification sent.
+end note
+
+ECS -> AS : log("ExpenseClaim", claimId,\n"DRAFT_SAVED", organizer, details)
+activate AS
+AS --> ECS : ok
+deactivate AS
+
+ECS --> EC : expenseClaim (DRAFT)
+deactivate ECS
+
+EC --> EO : 201 Created\n(ExpenseClaimResponse — status: DRAFT)
+deactivate EC
+
+@enduml
