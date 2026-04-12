@@ -6,7 +6,7 @@ A Spring Boot REST API for managing college event budgets, expense claims, and m
 - C Kaustubh (PES1UG23CS154)
 - Chiyedu Vishnu (PES1UG23CS169)
 - BB Varun Kumar (PES1UG23CS131)
-- Dareddy Devesh Reddy (PES1UG23CS172)
+- Dareddy Devesh Reddy (PES1UG23CS171)
 
 ---
 
