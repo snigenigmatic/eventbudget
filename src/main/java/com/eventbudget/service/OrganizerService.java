@@ -193,7 +193,7 @@ public class OrganizerService {
         claim.setWorkflow(workflow);
 
         if (workflow.getSteps().isEmpty()) {
-            claim.setStatus(ClaimStatus.APPROVED);
+            claim.setStatus(ClaimStatus.AUTO_APPROVED);
             budgetCategory.approveCommitted(request.amount());
             notificationService.notify(
                     organizer,

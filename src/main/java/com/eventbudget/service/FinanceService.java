@@ -16,9 +16,12 @@ import com.eventbudget.repository.AuditLogRepository;
 import com.eventbudget.repository.BudgetRepository;
 import com.eventbudget.repository.FinanceAdminRepository;
 import com.eventbudget.repository.WorkflowConfigRepository;
-import com.eventbudget.util.ReportExportUtil;
+import com.eventbudget.service.export.ReportExporter;
+import jakarta.annotation.PostConstruct;
 import java.time.LocalDateTime;
+import java.util.EnumMap;
 import java.util.List;
+import java.util.Map;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,7 +36,24 @@ public class FinanceService {
     private final AuditLogRepository auditLogRepository;
     private final NotificationService notificationService;
     private final AuditService auditService;
-    private final ReportExportUtil reportExportUtil;
+
+    /**
+     * ADAPTER PATTERN (Structural) — Spring injects every {@link ReportExporter}
+     * bean here. The service programs against the target interface and never
+     * references a specific format (PDF/CSV). Adding XLSX/HTML only requires
+     * a new adapter bean — no changes in this service.
+     */
+    private final List<ReportExporter> reportExporters;
+
+    private final Map<ExportFormat, ReportExporter> exportersByFormat =
+            new EnumMap<>(ExportFormat.class);
+
+    @PostConstruct
+    void indexExporters() {
+        for (ReportExporter exporter : reportExporters) {
+            exportersByFormat.put(exporter.getFormat(), exporter);
+        }
+    }
 
     @Transactional
     public WorkflowConfigResponse saveWorkflowConfig(Long financeAdminId, WorkflowConfigRequest request) {
@@ -93,9 +113,12 @@ public class FinanceService {
         getFinanceAdmin(financeAdminId);
         Budget budget = budgetRepository.findById(budgetId)
                 .orElseThrow(() -> new ResourceNotFoundException("Budget not found"));
-        return format == ExportFormat.PDF
-                ? reportExportUtil.exportBudgetPdf(budget)
-                : reportExportUtil.exportBudgetCsv(budget);
+
+        ReportExporter exporter = exportersByFormat.get(format);
+        if (exporter == null) {
+            throw new BusinessException("No exporter registered for format: " + format);
+        }
+        return exporter.export(budget);
     }
 
     @Transactional(readOnly = true)

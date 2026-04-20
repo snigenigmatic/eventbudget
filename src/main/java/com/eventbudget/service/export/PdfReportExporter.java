@@ -1,43 +1,39 @@
-package com.eventbudget.util;
+package com.eventbudget.service.export;
 
 import com.eventbudget.model.domain.Budget;
 import com.eventbudget.model.domain.BudgetCategory;
+import com.eventbudget.model.domain.ExportFormat;
+import java.nio.charset.StandardCharsets;
+import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
-import java.nio.charset.StandardCharsets;
-import java.time.format.DateTimeFormatter;
 import org.springframework.stereotype.Component;
 
+/**
+ * ADAPTER PATTERN (Structural) — Concrete adapter that adapts a {@link Budget}
+ * domain aggregate into a minimal PDF 1.4 byte stream.
+ *
+ * <p>The PDF specification is a different "interface" than our Java domain
+ * model: it requires a header, object catalog, page tree, font dictionary,
+ * content stream, cross-reference table and trailer. This class hides that
+ * complexity behind the common {@link ReportExporter} interface so callers
+ * treat PDF and CSV export identically.
+ */
 @Component
-public class ReportExportUtil {
+public class PdfReportExporter implements ReportExporter {
 
-    private static final DateTimeFormatter DATE_TIME_FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final DateTimeFormatter DATE_TIME_FORMATTER =
+            DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
 
-    public byte[] exportBudgetCsv(Budget budget) {
-        StringBuilder builder = new StringBuilder();
-        builder.append("Budget ID,Event,Status,Total Amount,Created At,Closed At").append('\n');
-        builder.append(budget.getBudgetId()).append(',')
-                .append(escape(budget.getEvent().getName())).append(',')
-                .append(budget.getStatus().name()).append(',')
-                .append(budget.getTotalAmount()).append(',')
-                .append(formatTimestamp(budget.getCreatedAt())).append(',')
-                .append(formatTimestamp(budget.getClosedAt())).append('\n');
-        builder.append('\n');
-        builder.append("Category,Allocated,Committed,Approved,Available,Utilization %").append('\n');
-        for (BudgetCategory category : budget.getCategories()) {
-            builder.append(escape(category.getExpenseCategory().getName())).append(',')
-                    .append(category.getAllocatedAmount()).append(',')
-                    .append(category.getCommittedAmount()).append(',')
-                    .append(category.getApprovedExpenditure()).append(',')
-                    .append(category.getAvailableBalance()).append(',')
-                    .append(category.getUtilizationPercent()).append('\n');
-        }
-        return builder.toString().getBytes(StandardCharsets.UTF_8);
+    @Override
+    public ExportFormat getFormat() {
+        return ExportFormat.PDF;
     }
 
-    public byte[] exportBudgetPdf(Budget budget) {
-        // Build plain lines — no escaping yet
+    @Override
+    public byte[] export(Budget budget) {
         List<String> lines = new ArrayList<>();
         lines.add("EVENT BUDGET REPORT");
         lines.add("===========================================");
@@ -50,7 +46,8 @@ public class ReportExportUtil {
         lines.add("");
         lines.add("CATEGORY BREAKDOWN");
         lines.add("===========================================");
-        lines.add(String.format("%-20s %10s %10s %10s %8s%%", "Category", "Allocated", "Committed", "Available", "Used"));
+        lines.add(String.format("%-20s %10s %10s %10s %8s%%",
+                "Category", "Allocated", "Committed", "Available", "Used"));
         lines.add("-------------------------------------------");
         for (BudgetCategory category : budget.getCategories()) {
             lines.add(String.format("%-20s %10s %10s %10s %8s%%",
@@ -61,7 +58,6 @@ public class ReportExportUtil {
                     category.getUtilizationPercent()));
         }
 
-        // Escape PDF string specials per line, then write into content stream
         StringBuilder streamBuilder = new StringBuilder();
         int y = 750;
         for (String line : lines) {
@@ -79,7 +75,8 @@ public class ReportExportUtil {
         List<String> objects = List.of(
                 "<< /Type /Catalog /Pages 2 0 R >>",
                 "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+                "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792]"
+                        + " /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
                 "<< /Type /Font /Subtype /Type1 /BaseFont /Courier >>",
                 "<< /Length " + stream.getBytes(StandardCharsets.UTF_8).length + " >>\nstream\n"
                         + stream
@@ -107,15 +104,11 @@ public class ReportExportUtil {
         return pdf.toString().getBytes(StandardCharsets.UTF_8);
     }
 
-    private String escape(String value) {
-        return "\"" + value.replace("\"", "\"\"") + "\"";
-    }
-
     private String sanitizeText(String value) {
         return value.replace("\n", " ").replace("\r", " ");
     }
 
-    private String formatTimestamp(java.time.LocalDateTime timestamp) {
+    private String formatTimestamp(LocalDateTime timestamp) {
         return timestamp == null ? "" : timestamp.format(DATE_TIME_FORMATTER);
     }
 }
